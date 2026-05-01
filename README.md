@@ -1,126 +1,204 @@
-# Smart_Mail_Agent
-Agent automatique qui analyse plusieurs boîtes Gmail, détecte les emails importants et envoie des notifications intelligentes sur Telegram, tout en évitant le spam.
+# 📬 Smart Mail Agent
 
-🚀 Objectif
+Système automatisé qui connecte un compte Gmail à Telegram pour analyser les emails non lus et envoyer des notifications intelligentes.
 
-Gagner du temps en automatisant la gestion des emails :
+---
 
-Lire plusieurs comptes Gmail
-Identifier les mails importants
-Ignorer les emails inutiles
-Regrouper les informations pertinentes
-Envoyer des notifications utiles (pas trop fréquentes)
-⚙️ Fonctionnalités
-📥 Lecture multi-comptes
-Support de plusieurs adresses Gmail
-Ajout / suppression facile via fichier de configuration
-🧠 Analyse intelligente
-Classification des emails en :
-IMPORTANT
-MOYEN
-INUTILE
-Basée sur une IA externe (ex : Mistral AI ou Anthropic)
-🔕 Anti-spam intelligent
-Notification immédiate uniquement pour les mails importants
-Regroupement des mails moyens en résumé
-Aucun message pour les emails inutiles
-📊 Résumé automatique
+# ⚙️ Architecture générale
 
-Exemple :
+Le projet est composé de 3 modules principaux :
 
-📊 Résumé (2 jours)
+- `collector.py` → gestion Telegram + inscription utilisateur + OAuth
+- `main.py` → analyse des emails Gmail + notifications
+- `init_db.py` → création et gestion de la base SQLite
+- `config.py` → configuration globale (API, OAuth, tokens)
 
-IMPORTANT:
-- Convocation entretien
-- Facture EDF
+---
 
-MOYEN:
-- 3 mails administratifs
+# 🔁 Flow complet du système
 
-INUTILE:
-- 12 promotions ignorées
-🧾 Gestion automatique
-Marque les mails inutiles comme lus
-Stocke l’historique des emails
-Évite les doublons
-🧠 Mémoire (contexte utilisateur)
-Conservation des anciens emails importants
-Amélioration progressive de la classification
-🏗️ Architecture
-GitHub Actions (toutes les 4h)
-        ↓
-Script Python
-        ↓
-Lecture Gmail (IMAP)
-        ↓
-Analyse IA
-        ↓
-Base de données (SQLite)
-        ↓
-Notification Telegram
-🛠️ Technologies utilisées
-Python
-IMAP (Gmail)
-GitHub Actions (automatisation)
-SQLite (stockage)
-Telegram (notifications)
-API IA (au choix) :
-Mistral AI
-Anthropic
-OpenAI
-📁 Structure du projet
-project/
-│
-├── main.py
-├── accounts.json
-├── database.db
-│
-├── gmail/
-├── ai/
-├── memory/
-├── notifier/
-⚡ Installation
-1. Cloner le projet
-git clone <repo>
-cd project
-2. Installer les dépendances
-pip install -r requirements.txt
-3. Configurer les comptes Gmail
+## 1. Connexion utilisateur (Telegram → OAuth)
 
-Créer accounts.json :
+1. L’utilisateur envoie :
+        /start user_id
 
-{
-  "accounts": [
-    {
-      "email": "example@gmail.com",
-      "app_password": "xxxx",
-      "active": true
-    }
-  ]
-}
-4. Configurer Telegram
-Créer un bot avec BotFather
-Récupérer :
-TOKEN
-CHAT_ID
-5. Configurer l’IA
+2. Le bot :
+- enregistre `chat_id + user_id`
+- génère un lien OAuth Google
+- envoie le lien à l’utilisateur
 
-Ajouter ta clé API dans le code ou via variables d’environnement.
+3. L’utilisateur autorise l’accès Gmail
 
-🔁 Automatisation
+4. Google redirige vers :
+        /callback?code=...&state=user_id
 
-Le script est exécuté automatiquement via GitHub Actions toutes les 4 heures.
+5. Le serveur récupère :
+- access_token
+- refresh_token
+- email Gmail connecté
 
-📈 Évolutions prévues
-Réponse automatique aux emails
-Priorisation avancée
-Dashboard web
-Apprentissage personnalisé
-Support d’autres services mail
-⚠️ Limites
-Dépend des APIs (IA, Gmail)
-Risque d’erreurs de classification
-Nécessite une configuration initiale
-📌 Conclusion
+6. Tout est stocké dans la base `oauth_tokens`
 
-Ce projet permet de transformer la gestion des emails en un système automatisé, intelligent et non intrusif, en utilisant des outils simples et peu coûteux.
+---
+
+## 2. Analyse des emails (main.py)
+
+Toutes les 30 secondes :
+
+1. Récupère tous les comptes connectés
+2. Récupère les emails NON LUS Gmail
+3. Pour chaque email :
+   - extrait sujet, expéditeur, pièces jointes
+   - le classe aléatoirement :
+     - urgent
+     - moyen
+     - inutile
+
+---
+
+# 📊 Logique de classification
+
+## 🚨 URGENT
+- Notification immédiate Telegram
+- Contient :
+  - sujet
+  - expéditeur
+  - pièces jointes
+- Ajoute aussi les emails "inutiles" accumulés
+
+---
+
+## ⚠️ MOYEN
+- Vérifie l’âge du mail
+- Si ≥ 2 jours :
+  - envoie notification Telegram
+  - ajoute les "inutiles"
+- Sinon : ignoré
+
+---
+
+## ❌ INUTILE
+- Aucun message Telegram immédiat
+- Stocké en base SQLite
+- Contient :
+  - sujet
+  - expéditeur
+  - pièces jointes
+  - date de marquage
+
+---
+
+## 📦 INUTILES (historique)
+
+Les mails inutiles sont :
+- stockés dans `useless_mails`
+- regroupés et envoyés lors d’un mail urgent ou moyen
+- puis supprimés après envoi
+
+---
+
+# 🗄️ Base de données
+
+## users
+| champ | description |
+|------|-------------|
+| chat_id | ID Telegram |
+| user_id | identifiant utilisateur |
+
+---
+
+## oauth_tokens
+| champ | description |
+|------|-------------|
+| chat_id | utilisateur Telegram |
+| user_id | ID interne |
+| gmail | compte Gmail connecté |
+| access_token | token API |
+| refresh_token | token renouvellement |
+| expires_in | durée token |
+
+---
+
+## useless_mails
+| champ | description |
+|------|-------------|
+| msg_id | ID Gmail |
+| subject | sujet |
+| sender | expéditeur |
+| attachments | pièces jointes |
+| seen_at | date de marquage |
+
+---
+
+# 📡 API utilisées
+
+- Telegram Bot API
+- Gmail API (OAuth Google)
+- SQLite (local storage)
+
+---
+
+# 🧠 Technologies
+
+- Python
+- Flask (OAuth callback)
+- Requests
+- SQLite
+- Google OAuth2
+
+---
+
+# 🔐 Authentification
+
+Le système utilise OAuth2 Google :
+
+- scope : `gmail.readonly`
+- accès sécurisé
+- refresh token pour accès long terme
+
+---
+
+# ⏱️ Execution
+
+### 1. Lancer le bot Telegram
+
+python collector.py
+
+### 2. Lancer le serveur OAuth
+
+python serveur_auth.py
+
+### 3. Lancer l’agent email
+
+python main.py
+
+
+---
+
+# ⚠️ Limitations actuelles
+
+- classification des emails est aléatoire (V1)
+- pas encore d’IA réelle
+- refresh token non géré automatiquement
+- optimisation Gmail API limitée
+
+---
+
+# 🚀 Améliorations futures
+
+- classification intelligente (IA ou scoring)
+- résumé automatique des emails
+- gestion multi-comptes Gmail
+- dashboard web
+- optimisation des requêtes Gmail
+
+---
+
+# 📌 Objectif du projet
+
+Créer un agent intelligent capable de :
+
+- surveiller une boîte Gmail
+- détecter les emails importants
+- notifier instantanément sur Telegram
+- filtrer automatiquement le bruit
