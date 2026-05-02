@@ -1,5 +1,8 @@
 import os
 from urllib.parse import urlencode
+from dotenv import load_dotenv
+
+load_dotenv()  # Charge le fichier .env automatiquement
 
 # =========================
 # TELEGRAM
