@@ -8,6 +8,17 @@ from config import CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, TELEGRAM_TOKEN, DATAB
 app = Flask(__name__)
 
 # =========================
+# DEBUG — affiché dans les logs Render au démarrage
+# =========================
+print("=== CONFIG CHARGÉE ===")
+print(f"CLIENT_ID     : {'OK' if CLIENT_ID else '❌ MANQUANT'}")
+print(f"CLIENT_SECRET : {'OK' if CLIENT_SECRET else '❌ MANQUANT'}")
+print(f"REDIRECT_URI  : {REDIRECT_URI}")
+print(f"DATABASE_URL  : {'OK' if DATABASE_URL else '❌ MANQUANT'}")
+print(f"TELEGRAM_TOKEN: {'OK' if TELEGRAM_TOKEN else '❌ MANQUANT'}")
+print("======================")
+
+# =========================
 # CONNEXION DB
 # =========================
 
