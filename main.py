@@ -1,9 +1,12 @@
-import sqlite3
+import psycopg2
 import requests
 import random
 import time
 from datetime import datetime, timedelta
-from config import bd_file, TELEGRAM_TOKEN
+from config import (
+    DATABASE_URL, TELEGRAM_TOKEN,
+    CLIENT_ID, CLIENT_SECRET
+)
 
 # =========================
 # TELEGRAM
@@ -17,25 +20,37 @@ def send_message(chat_id, text):
 # DB
 # =========================
 
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
+
 def get_accounts():
-    conn = sqlite3.connect(bd_file)
-    cur = conn.cursor()
-
-    cur.execute("SELECT chat_id, gmail, access_token FROM oauth_tokens")
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute("SELECT chat_id, gmail, access_token, refresh_token, expires_at FROM oauth_tokens")
     data = cur.fetchall()
-
+    cur.close()
     conn.close()
     return data
 
+def update_access_token(chat_id, new_token, new_expires_at):
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute("""
+        UPDATE oauth_tokens
+        SET access_token = %s, expires_at = %s
+        WHERE chat_id = %s
+    """, (new_token, new_expires_at, chat_id))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def save_useless(msg_id, subject, sender, attachments):
-    conn = sqlite3.connect(bd_file)
-    cur = conn.cursor()
-
+    conn = get_conn()
+    cur  = conn.cursor()
     cur.execute("""
-    INSERT OR IGNORE INTO useless_mails
-    (msg_id, subject, sender, attachments, seen_at)
-    VALUES (?, ?, ?, ?, ?)
+        INSERT INTO useless_mails (msg_id, subject, sender, attachments, seen_at)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (msg_id) DO NOTHING
     """, (
         msg_id,
         subject,
@@ -43,32 +58,55 @@ def save_useless(msg_id, subject, sender, attachments):
         ",".join(attachments),
         datetime.now().isoformat()
     ))
-
     conn.commit()
+    cur.close()
     conn.close()
-
 
 def get_useless():
-    conn = sqlite3.connect(bd_file)
-    cur = conn.cursor()
-
-    cur.execute("""
-    SELECT subject, sender, attachments, seen_at FROM useless_mails
-    """)
-
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute("SELECT subject, sender, attachments, seen_at FROM useless_mails")
     rows = cur.fetchall()
+    cur.close()
     conn.close()
-
     return rows
 
-
 def clear_useless():
-    conn = sqlite3.connect(bd_file)
-    cur = conn.cursor()
-
+    conn = get_conn()
+    cur  = conn.cursor()
     cur.execute("DELETE FROM useless_mails")
     conn.commit()
+    cur.close()
     conn.close()
+
+# =========================
+# REFRESH TOKEN
+# =========================
+
+def is_token_expired(expires_at):
+    """Retourne True si le token expire dans moins de 5 minutes."""
+    return time.time() > (expires_at - 300)
+
+def refresh_access_token(refresh_token):
+    """
+    Appelle Google pour obtenir un nouveau access_token.
+    Retourne (new_access_token, new_expires_at) ou (None, None) si erreur.
+    """
+    r = requests.post("https://oauth2.googleapis.com/token", data={
+        "client_id":     CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "refresh_token": refresh_token,
+        "grant_type":    "refresh_token"
+    })
+    data = r.json()
+
+    if "access_token" not in data:
+        print(f"Erreur refresh_token : {data}")
+        return None, None
+
+    new_token      = data["access_token"]
+    new_expires_at = int(time.time()) + int(data.get("expires_in", 3600))
+    return new_token, new_expires_at
 
 # =========================
 # GMAIL
@@ -76,23 +114,18 @@ def clear_useless():
 
 def get_unread(token):
     headers = {"Authorization": f"Bearer {token}"}
-
     r = requests.get(
         "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread",
         headers=headers
     )
-
     return r.json().get("messages", [])
-
 
 def get_mail(token, msg_id):
     headers = {"Authorization": f"Bearer {token}"}
-
     r = requests.get(
         f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}",
         headers=headers
     )
-
     return r.json()
 
 # =========================
@@ -100,11 +133,10 @@ def get_mail(token, msg_id):
 # =========================
 
 def extract(msg):
-    payload = msg.get("payload", {})
-    headers = payload.get("headers", [])
-
-    subject = ""
-    sender = ""
+    payload     = msg.get("payload", {})
+    headers     = payload.get("headers", [])
+    subject     = ""
+    sender      = ""
     attachments = []
 
     for h in headers:
@@ -127,17 +159,15 @@ def classify():
     return random.choice(["urgent", "moyen", "inutile"])
 
 # =========================
-# INUTILES FORMAT
+# FORMAT INUTILES
 # =========================
 
 def format_useless():
     data = get_useless()
-
     if not data:
         return ""
 
-    text = "\n📦 MAILS MARQUÉS COMME LUS:\n"
-
+    text = "\n📦 MAILS EN ATTENTE:\n"
     for subject, sender, attachments, seen_at in data:
         text += f"\n- Sujet: {subject}"
         text += f"\n  De: {sender}"
@@ -145,7 +175,6 @@ def format_useless():
         text += f"\n  Lu le: {seen_at}\n"
 
     clear_useless()
-
     return text
 
 # =========================
@@ -153,48 +182,64 @@ def format_useless():
 # =========================
 
 def run():
-    print("Agent Gmail V3 lancé...")
+    print("Agent Gmail démarré...")
 
     while True:
         accounts = get_accounts()
 
-        for chat_id, gmail, token in accounts:
-
+        for chat_id, gmail, token, refresh_token, expires_at in accounts:
             try:
+
+                # --- Refresh du token si expiré ou proche de l'expiration ---
+                if is_token_expired(expires_at):
+                    print(f"Token expiré pour {gmail}, rafraîchissement...")
+                    new_token, new_expires_at = refresh_access_token(refresh_token)
+
+                    if new_token:
+                        update_access_token(chat_id, new_token, new_expires_at)
+                        token = new_token
+                        print(f"Token rafraîchi pour {gmail}")
+                    else:
+                        print(f"Impossible de rafraîchir le token pour {gmail}, skip.")
+                        continue
+
+                # --- Récupération et traitement des emails ---
                 messages = get_unread(token)
 
                 for msg in messages:
-                    msg_id = msg["id"]
-                    full = get_mail(token, msg_id)
-
+                    msg_id          = msg["id"]
+                    full            = get_mail(token, msg_id)
                     subject, sender, attachments = extract(full)
-
-                    category = classify()
+                    category        = classify()
 
                     # ================= URGENT =================
                     if category == "urgent":
                         useless_block = format_useless()
-
-                        text = f"🚨 URGENT\nSujet: {subject}\nDe: {sender}\nPJ: {attachments if attachments else 'Aucune'}"
-
+                        text = (
+                            f"🚨 URGENT\n"
+                            f"Sujet: {subject}\n"
+                            f"De: {sender}\n"
+                            f"PJ: {attachments if attachments else 'Aucune'}"
+                        )
                         if useless_block:
                             text += useless_block
-
                         send_message(chat_id, text)
 
                     # ================= MOYEN =================
                     elif category == "moyen":
-                        date = int(full.get("internalDate", 0)) / 1000
+                        date      = int(full.get("internalDate", 0)) / 1000
                         mail_date = datetime.fromtimestamp(date)
 
                         if datetime.now() - mail_date >= timedelta(days=2):
                             useless_block = format_useless()
-
-                            text = f"⚠️ MOYEN\nSujet: {subject}\nDe: {sender}\nPJ: {attachments if attachments else 'Aucune'}"
-
+                            text = (
+                                f"⚠️ MOYEN\n"
+                                f"Sujet: {subject}\n"
+                                f"De: {sender}\n"
+                                f"PJ: {attachments if attachments else 'Aucune'}"
+                            )
                             if useless_block:
                                 text += useless_block
-
                             send_message(chat_id, text)
 
                     # ================= INUTILE =================
@@ -202,7 +247,7 @@ def run():
                         save_useless(msg_id, subject, sender, attachments)
 
             except Exception as e:
-                print("Erreur:", gmail, e)
+                print(f"Erreur [{gmail}]: {e}")
 
         time.sleep(30)
 

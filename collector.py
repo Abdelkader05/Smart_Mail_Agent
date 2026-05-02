@@ -1,21 +1,14 @@
 import requests
-import sqlite3
 import time
-from config import *
+from config import TELEGRAM_TOKEN, SERVER_URL, generate_auth_url
 import init_db
 
-conn = sqlite3.connect(bd_file)
-cursor = conn.cursor()
-
-def save_user(chat_id, user_id):
-    cursor.execute("""
-    INSERT OR REPLACE INTO users (chat_id, user_id)
-    VALUES (?, ?)
-    """, (chat_id, user_id))
-    conn.commit()
+# =========================
+# TELEGRAM
+# =========================
 
 def get_updates(offset=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    url    = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
     params = {"timeout": 10}
     if offset:
         params["offset"] = offset
@@ -25,8 +18,33 @@ def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     requests.post(url, data={"chat_id": chat_id, "text": text})
 
+# =========================
+# API SERVEUR (remplace SQLite local)
+# =========================
+
+def save_user(chat_id, user_id):
+    """
+    Enregistre l'utilisateur via l'API Flask hébergée sur Render.
+    Plus d'accès direct à SQLite.
+    """
+    try:
+        r = requests.post(
+            f"{SERVER_URL}/add_user",
+            json={"chat_id": str(chat_id), "user_id": str(user_id)},
+            timeout=10
+        )
+        if r.status_code != 200:
+            print(f"Erreur save_user : {r.status_code} {r.text}")
+    except Exception as e:
+        print(f"Impossible de joindre le serveur : {e}")
+
+# =========================
+# BOUCLE PRINCIPALE
+# =========================
+
 def run():
     offset = None
+    print("Bot Telegram démarré...")
 
     while True:
         data = get_updates(offset)
@@ -37,9 +55,9 @@ def run():
             if "message" not in update:
                 continue
 
-            msg = update["message"]
+            msg     = update["message"]
             chat_id = msg["chat"]["id"]
-            text = msg.get("text", "")
+            text    = msg.get("text", "")
 
             if text.startswith("/start"):
                 parts = text.split()
@@ -47,8 +65,10 @@ def run():
                 if len(parts) == 2:
                     user_id = parts[1]
 
+                    # 1. Enregistrement via API (plus SQLite)
                     save_user(chat_id, user_id)
 
+                    # 2. Génération du lien OAuth
                     auth_url = generate_auth_url(user_id)
 
                     send_message(chat_id, "Autorise l'accès Gmail :")
@@ -59,6 +79,10 @@ def run():
 
         time.sleep(5)
 
+# =========================
+# START
+# =========================
+
 if __name__ == "__main__":
-    init_db.create_table()
+    init_db.create_table()  # Crée les tables PostgreSQL si elles n'existent pas
     run()
