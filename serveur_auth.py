@@ -49,16 +49,18 @@ def get_gmail_address(access_token):
 def save_tokens(chat_id, user_id, gmail, tokens):
     conn = get_conn()
     cur = conn.cursor()
-    expires_at = int(time.time()) + int(tokens.get("expires_in", 3600))
+    expires_at   = int(time.time()) + int(tokens.get("expires_in", 3600))
+    connected_at = int(time.time())  # timestamp UNIX au moment de la connexion OAuth
     cur.execute("""
-        INSERT INTO oauth_tokens (chat_id, user_id, gmail, access_token, refresh_token, expires_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO oauth_tokens (chat_id, user_id, gmail, access_token, refresh_token, expires_at, connected_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT DO NOTHING
     """, (
         chat_id, user_id, gmail,
         tokens.get("access_token"),
         tokens.get("refresh_token"),
-        expires_at
+        expires_at,
+        connected_at
     ))
     conn.commit()
     cur.close()
@@ -137,17 +139,18 @@ def add_user():
 def get_tokens():
     conn = get_conn()
     cur  = conn.cursor()
-    cur.execute("SELECT chat_id, gmail, access_token, refresh_token, expires_at FROM oauth_tokens")
+    cur.execute("SELECT chat_id, gmail, access_token, refresh_token, expires_at, connected_at FROM oauth_tokens")
     rows = cur.fetchall()
     cur.close()
     conn.close()
     result = [
         {
-            "chat_id":       row[0],
-            "gmail":         row[1],
-            "access_token":  row[2],
-            "refresh_token": row[3],
-            "expires_at":    row[4]
+            "chat_id":      row[0],
+            "gmail":        row[1],
+            "access_token": row[2],
+            "refresh_token":row[3],
+            "expires_at":   row[4],
+            "connected_at": row[5]   # timestamp UNIX de connexion OAuth
         }
         for row in rows
     ]
@@ -234,7 +237,7 @@ def clear_useless():
     return jsonify({"status": "cleared"}), 200
 
 # =========================
-# ROUTE API — Supprimer tous les tokens OAuth  ← NOUVEAU
+# ROUTE API — Supprimer tous les tokens OAuth
 # =========================
 
 @app.route("/clear_tokens", methods=["POST"])
@@ -248,7 +251,7 @@ def clear_tokens():
     return jsonify({"status": "cleared"}), 200
 
 # =========================
-# ROUTE API — Supprimer tous les utilisateurs  ← NOUVEAU
+# ROUTE API — Supprimer tous les utilisateurs
 # =========================
 
 @app.route("/clear_users", methods=["POST"])
