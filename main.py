@@ -13,7 +13,7 @@ def send_message(chat_id, text):
     requests.post(url, data={"chat_id": chat_id, "text": text})
 
 # =========================
-# API SERVEUR — remplace toutes les connexions DB directes
+# API SERVEUR — tout passe par HTTP, plus de PostgreSQL direct
 # =========================
 
 def get_accounts():
@@ -61,9 +61,7 @@ def refresh_access_token(refresh_token):
     if "access_token" not in data:
         print(f"Erreur refresh_token : {data}")
         return None, None
-    new_token      = data["access_token"]
-    new_expires_at = int(time.time()) + int(data.get("expires_in", 3600))
-    return new_token, new_expires_at
+    return data["access_token"], int(time.time()) + int(data.get("expires_in", 3600))
 
 # =========================
 # GMAIL
@@ -150,14 +148,13 @@ def run():
             continue
 
         for account in accounts:
-            chat_id      = account["chat_id"]
-            gmail        = account["gmail"]
-            token        = account["access_token"]
+            chat_id       = account["chat_id"]
+            gmail         = account["gmail"]
+            token         = account["access_token"]
             refresh_token = account["refresh_token"]
-            expires_at   = account["expires_at"]
+            expires_at    = account["expires_at"]
 
             try:
-                # Refresh si token expiré ou proche de l'expiration
                 if is_token_expired(expires_at):
                     print(f"Token expiré pour {gmail}, rafraîchissement...")
                     new_token, new_expires_at = refresh_access_token(refresh_token)
@@ -172,42 +169,28 @@ def run():
                 messages = get_unread(token)
 
                 for msg in messages:
-                    msg_id               = msg["id"]
-                    full                 = get_mail(token, msg_id)
+                    msg_id                       = msg["id"]
+                    full                         = get_mail(token, msg_id)
                     subject, sender, attachments = extract(full)
-                    category             = classify()
+                    category                     = classify()
 
-                    # ================= URGENT =================
                     if category == "urgent":
                         useless_block = format_useless()
-                        text = (
-                            f"🚨 URGENT\n"
-                            f"Sujet: {subject}\n"
-                            f"De: {sender}\n"
-                            f"PJ: {attachments if attachments else 'Aucune'}"
-                        )
+                        text = f"🚨 URGENT\nSujet: {subject}\nDe: {sender}\nPJ: {attachments if attachments else 'Aucune'}"
                         if useless_block:
                             text += useless_block
                         send_message(chat_id, text)
 
-                    # ================= MOYEN =================
                     elif category == "moyen":
                         date      = int(full.get("internalDate", 0)) / 1000
                         mail_date = datetime.fromtimestamp(date)
-
                         if datetime.now() - mail_date >= timedelta(days=2):
                             useless_block = format_useless()
-                            text = (
-                                f"⚠️ MOYEN\n"
-                                f"Sujet: {subject}\n"
-                                f"De: {sender}\n"
-                                f"PJ: {attachments if attachments else 'Aucune'}"
-                            )
+                            text = f"⚠️ MOYEN\nSujet: {subject}\nDe: {sender}\nPJ: {attachments if attachments else 'Aucune'}"
                             if useless_block:
                                 text += useless_block
                             send_message(chat_id, text)
 
-                    # ================= INUTILE =================
                     else:
                         save_useless(msg_id, subject, sender, attachments)
 

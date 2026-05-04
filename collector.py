@@ -1,7 +1,6 @@
 import requests
 import time
 from config import TELEGRAM_TOKEN, SERVER_URL, generate_auth_url
-import init_db
 
 # =========================
 # TELEGRAM
@@ -19,14 +18,10 @@ def send_message(chat_id, text):
     requests.post(url, data={"chat_id": chat_id, "text": text})
 
 # =========================
-# API SERVEUR (remplace SQLite local)
+# API SERVEUR
 # =========================
 
 def save_user(chat_id, user_id):
-    """
-    Enregistre l'utilisateur via l'API Flask hébergée sur Render.
-    Plus d'accès direct à SQLite.
-    """
     try:
         r = requests.post(
             f"{SERVER_URL}/add_user",
@@ -64,16 +59,10 @@ def run():
 
                 if len(parts) == 2:
                     user_id = parts[1]
-
-                    # 1. Enregistrement via API (plus SQLite)
                     save_user(chat_id, user_id)
-
-                    # 2. Génération du lien OAuth
                     auth_url = generate_auth_url(user_id)
-
                     send_message(chat_id, "Autorise l'accès Gmail :")
                     send_message(chat_id, auth_url)
-
                 else:
                     send_message(chat_id, "Utilise : /start user_id")
 
@@ -84,5 +73,4 @@ def run():
 # =========================
 
 if __name__ == "__main__":
-    init_db.create_table()  # Crée les tables PostgreSQL si elles n'existent pas
-    run()
+    run()  # Plus d'init_db ici, les tables existent déjà sur Render
