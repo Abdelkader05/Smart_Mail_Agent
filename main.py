@@ -5,6 +5,12 @@ from datetime import datetime, timedelta
 from config import TELEGRAM_TOKEN, SERVER_URL, CLIENT_ID, CLIENT_SECRET
 
 # =========================
+# DÉDUPLICATION EN MÉMOIRE
+# =========================
+# Set global : contient tous les msg_id déjà traités depuis le lancement
+processed_ids = set()
+
+# =========================
 # TELEGRAM
 # =========================
 
@@ -13,7 +19,7 @@ def send_message(chat_id, text):
     requests.post(url, data={"chat_id": chat_id, "text": text})
 
 # =========================
-# API SERVEUR — tout passe par HTTP, plus de PostgreSQL direct
+# API SERVEUR
 # =========================
 
 def get_accounts():
@@ -133,11 +139,35 @@ def format_useless():
     return text
 
 # =========================
+# INIT : marquer les emails existants comme déjà vus
+# =========================
+
+def preload_existing_emails(token, gmail):
+    """
+    Au démarrage, récupère tous les emails non lus actuels et les ajoute
+    dans processed_ids SANS envoyer de notification.
+    Seuls les emails arrivant APRÈS ce moment seront notifiés.
+    """
+    try:
+        messages = get_unread(token)
+        count = 0
+        for msg in messages:
+            msg_id = msg["id"]
+            if msg_id not in processed_ids:
+                processed_ids.add(msg_id)
+                count += 1
+        if count > 0:
+            print(f"[{gmail}] {count} email(s) existant(s) ignorés (déjà présents au démarrage)")
+    except Exception as e:
+        print(f"[{gmail}] Erreur preload : {e}")
+
+# =========================
 # MAIN LOOP
 # =========================
 
 def run():
     print("Agent Gmail démarré...")
+    first_run = True  # Indique si c'est le premier passage
 
     while True:
         try:
@@ -155,6 +185,7 @@ def run():
             expires_at    = account["expires_at"]
 
             try:
+                # Refresh token si nécessaire
                 if is_token_expired(expires_at):
                     print(f"Token expiré pour {gmail}, rafraîchissement...")
                     new_token, new_expires_at = refresh_access_token(refresh_token)
@@ -166,10 +197,24 @@ def run():
                         print(f"Impossible de rafraîchir le token pour {gmail}, skip.")
                         continue
 
+                # Premier passage : marquer les emails existants sans notifier
+                if first_run:
+                    preload_existing_emails(token, gmail)
+                    continue  # On ne traite rien lors du premier passage
+
+                # Passages suivants : traiter uniquement les nouveaux emails
                 messages = get_unread(token)
 
                 for msg in messages:
-                    msg_id                       = msg["id"]
+                    msg_id = msg["id"]
+
+                    # Déjà traité → on skip
+                    if msg_id in processed_ids:
+                        continue
+
+                    # Nouveau mail → on le marque immédiatement
+                    processed_ids.add(msg_id)
+
                     full                         = get_mail(token, msg_id)
                     subject, sender, attachments = extract(full)
                     category                     = classify()
@@ -196,6 +241,11 @@ def run():
 
             except Exception as e:
                 print(f"Erreur [{gmail}]: {e}")
+
+        # Après le premier tour complet sur tous les comptes, on passe en mode normal
+        if first_run:
+            print("Initialisation terminée. Surveillance des nouveaux emails...")
+            first_run = False
 
         time.sleep(30)
 

@@ -234,6 +234,34 @@ def clear_useless():
     return jsonify({"status": "cleared"}), 200
 
 # =========================
+# ROUTE API — Supprimer tous les tokens OAuth  ← NOUVEAU
+# =========================
+
+@app.route("/clear_tokens", methods=["POST"])
+def clear_tokens():
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute("DELETE FROM oauth_tokens")
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"status": "cleared"}), 200
+
+# =========================
+# ROUTE API — Supprimer tous les utilisateurs  ← NOUVEAU
+# =========================
+
+@app.route("/clear_users", methods=["POST"])
+def clear_users():
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute("DELETE FROM users")
+    conn.commit()
+    cur.close()
+    conn.close()
+    return jsonify({"status": "cleared"}), 200
+
+# =========================
 # START
 # =========================
 
