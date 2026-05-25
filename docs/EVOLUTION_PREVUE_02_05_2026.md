@@ -7,7 +7,7 @@
 
 ## 🎯 Objectif principal de l'évolution
 
-Supprimer la dépendance au PC local pour le traitement des emails (`main.py` et `serveur_auth.py`), tout en restant **100% gratuit**, en déployant les composants serveurs sur **Render**.
+Supprimer la dépendance au PC local pour le traitement des emails (`src/main.py` et `src/serveur_auth.py`), tout en restant **100% gratuit**, en déployant les composants serveurs sur **Render**.
 
 ---
 
@@ -15,8 +15,8 @@ Supprimer la dépendance au PC local pour le traitement des emails (`main.py` et
 
 | Problème | Détail |
 |---|---|
-| `main.py` tourne en local | Le PC doit rester allumé pour que le système fonctionne |
-| `serveur_auth.py` tourne en local | Le callback OAuth n'est pas accessible depuis internet sans tunnel (ngrok, etc.) |
+| `src/main.py` tourne en local | Le PC doit rester allumé pour que le système fonctionne |
+| `src/serveur_auth.py` tourne en local | Le callback OAuth n'est pas accessible depuis internet sans tunnel (ngrok, etc.) |
 | SQLite en local | Non partageable entre services, non persistante sur Render |
 | Refresh token non géré | Si le token expire, le système s'arrête silencieusement |
 | Classification aléatoire | Pas de vraie logique d'analyse (V1 temporaire) |
@@ -67,7 +67,7 @@ Supprimer la dépendance au PC local pour le traitement des emails (`main.py` et
 
 ## 📦 Détail des changements fichier par fichier
 
-### 1. `serveur_auth.py` → déplacé sur Render (Web Service)
+### 1. `src/serveur_auth.py` → déplacé sur Render (Web Service)
 
 **Avant :** tourne en local, callback OAuth inaccessible sans tunnel.
 
@@ -84,7 +84,7 @@ https://ton-app.onrender.com/callback
 
 ---
 
-### 2. `main.py` → déplacé sur Render (Background Worker)
+### 2. `src/main.py` → déplacé sur Render (Background Worker)
 
 **Avant :** tourne en local dans un terminal, dépend du PC.
 
@@ -112,7 +112,7 @@ while True:
 
 ---
 
-### 3. `collector.py` → reste en local, mais adapté
+### 3. `src/collector.py` → reste en local, mais adapté
 
 **Avant :** écrivait directement dans SQLite local.
 
@@ -136,7 +136,7 @@ requests.post("https://ton-app.onrender.com/add_user", json={
 
 ---
 
-### 4. `init_db.py` → migration SQLite → PostgreSQL
+### 4. `scripts/init_db.py` → migration SQLite → PostgreSQL
 
 **Avant :** crée des tables SQLite locales.
 
@@ -207,9 +207,9 @@ REDIRECT_URI=https://ton-app.onrender.com/callback
 
 ---
 
-## 🔌 Nouvelles routes API Flask (à créer dans `serveur_auth.py`)
+## 🔌 Nouvelles routes API Flask (à créer dans `src/serveur_auth.py`)
 
-Ces routes permettent à `collector.py` (local) d'interagir avec la DB distante sans accès direct.
+Ces routes permettent à `src/collector.py` (local) d'interagir avec la DB distante sans accès direct.
 
 | Route | Méthode | Rôle |
 |---|---|---|
@@ -232,7 +232,7 @@ Ces routes permettent à `collector.py` (local) d'interagir avec la DB distante 
 
 C'est un point **critique** actuellement manquant. Sans ça, le système s'arrête dès l'expiration du token (généralement 1h).
 
-**Logique à ajouter dans `main.py` :**
+**Logique à ajouter dans `src/main.py` :**
 ```python
 import time
 
@@ -267,21 +267,21 @@ if is_token_expired(account["expires_at"]):
 | Gratuit | ✅ | ✅ (plan gratuit Render) |
 | Complexité | Faible | Moyenne |
 
-SQLite ne peut pas être partagé entre `serveur_auth.py` et `main.py` si ces deux services tournent sur Render dans des environnements isolés. Et le filesystem de Render est éphémère (reset à chaque redémarrage), donc les données seraient perdues.
+SQLite ne peut pas être partagé entre `src/serveur_auth.py` et `src/main.py` si ces deux services tournent sur Render dans des environnements isolés. Et le filesystem de Render est éphémère (reset à chaque redémarrage), donc les données seraient perdues.
 
 ---
 
 ## ☁️ Déploiement Render prévu
 
 ### Service 1 : Web Service (Flask)
-- **Fichier :** `serveur_auth.py`
-- **Start command :** `python serveur_auth.py`
+- **Fichier :** `src/serveur_auth.py`
+- **Start command :** `python -m src.serveur_auth`
 - **Port :** 5000 (ou variable `$PORT` de Render)
 - **URL publique :** `https://ton-app.onrender.com`
 
 ### Service 2 : Background Worker
-- **Fichier :** `main.py`
-- **Start command :** `python main.py`
+- **Fichier :** `src/main.py`
+- **Start command :** `python -m src.main`
 - **Pas de port exposé** (worker pur)
 
 ### Base de données
@@ -349,12 +349,12 @@ python-telegram-bot
 ## 📋 Ordre d'implémentation recommandé
 
 1. **Créer la DB PostgreSQL sur Render** → récupérer `DATABASE_URL`
-2. **Adapter `init_db.py`** → réécrire en PostgreSQL, créer les tables
-3. **Adapter `serveur_auth.py`** → PostgreSQL + routes API
+2. **Adapter `scripts/init_db.py`** → réécrire en PostgreSQL, créer les tables
+3. **Adapter `src/serveur_auth.py`** → PostgreSQL + routes API
 4. **Déployer Flask sur Render** (Web Service)
-5. **Adapter `main.py`** → PostgreSQL + gestion refresh_token
-6. **Déployer `main.py` sur Render** (Background Worker)
-7. **Adapter `collector.py`** → remplacer SQLite par appels API
+5. **Adapter `src/main.py`** → PostgreSQL + gestion refresh_token
+6. **Déployer `src/main.py` sur Render** (Background Worker)
+7. **Adapter `src/collector.py`** → remplacer SQLite par appels API
 8. **Tester le flow complet** de bout en bout
 
 ---

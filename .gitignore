@@ -1,1 +1,8 @@
 .env
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/*.db
+data/smart_mail_agent.db
+data/pending_tokens.json

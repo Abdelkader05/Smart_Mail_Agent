@@ -20,11 +20,11 @@ Créer un agent intelligent capable de :
 ## 1. Authentification OAuth Google
 
 - L'utilisateur envoie `/start user_id` au bot Telegram
-- `collector.py` enregistre le `chat_id` + `user_id` via API HTTP vers Render
+- `src/collector.py` enregistre le `chat_id` + `user_id` via API HTTP vers Render
 - Un lien OAuth Google est généré et envoyé à l'utilisateur
 - L'utilisateur autorise l'accès Gmail
 - Google redirige vers `https://smart-mail-server.onrender.com/callback`
-- `serveur_auth.py` (sur Render) récupère `access_token`, `refresh_token`, email Gmail
+- `src/serveur_auth.py` (sur Render) récupère `access_token`, `refresh_token`, email Gmail
 - Les tokens sont stockés dans PostgreSQL sur Render
 - Une notification Telegram confirme la connexion : `✅ Gmail connecté : email@gmail.com`
 
@@ -92,7 +92,7 @@ Migré depuis SQLite local vers PostgreSQL cloud.
 
 ## 4. Gestion automatique du refresh_token
 
-- Implémentée dans `main.py`
+- Implémentée dans `src/main.py`
 - Le token est rafraîchi automatiquement s'il expire dans moins de 5 minutes
 - Appel à `https://oauth2.googleapis.com/token` avec `grant_type=refresh_token`
 - Le nouveau `access_token` et `expires_at` sont mis à jour en DB
@@ -190,7 +190,7 @@ Sur Render, les variables sont définies directement dans le dashboard (pas de `
 
 # ❌ CE QUI N'EST PAS ENCORE FAIT
 
-## 1. `main.py` en cloud (24/7 sans PC)
+## 1. `src/main.py` en cloud (24/7 sans PC)
 
 **Problème rencontré :**
 - Render Background Worker → plus de plan gratuit
@@ -199,7 +199,7 @@ Sur Render, les variables sont définies directement dans le dashboard (pas de `
 
 **Solution identifiée (non implémentée) :**
 - Oracle Cloud Free Tier : VPS gratuit à vie, aucune restriction réseau
-- Alternative : héberger `main.py` sur Render en payant (~$7/mois)
+- Alternative : héberger `src/main.py` sur Render en payant (~$7/mois)
 
 **Status : ❌ Non implémenté — main.py tourne en local**
 
@@ -296,14 +296,19 @@ Interface web pour voir les emails traités, les statistiques, gérer les compte
 
 ```
 Smart_Mail_Agent/
-├── main.py            → Boucle principale (local, accès PostgreSQL direct)
-├── collector.py       → Bot Telegram (local, appels API vers Render)
-├── serveur_auth.py    → Serveur Flask OAuth + API interne (Render)
-├── config.py          → Config globale (os.getenv + dotenv)
-├── init_db.py         → Création tables PostgreSQL
-├── requirements.txt   → Dépendances Python
-├── .env               → Variables sensibles (NON commité sur GitHub)
-└── .gitignore         → Contient .env
+├── src/
+│   ├── main.py            → Boucle principale (local, accès PostgreSQL direct)
+│   ├── collector.py       → Bot Telegram (local, appels API vers Render)
+│   ├── serveur_auth.py    → Serveur Flask OAuth + API interne (Render)
+│   └── config.py          → Config globale (os.getenv + dotenv)
+├── scripts/
+│   ├── init_db.py         → Création tables PostgreSQL
+│   └── reset_db.py        → Nettoyage via l'API Flask
+├── docs/                  → Notes de contexte et roadmap
+├── data/                  → Ancienne base SQLite locale archivée
+├── requirements.txt       → Dépendances Python
+├── .env                   → Variables sensibles (NON commité sur GitHub)
+└── .gitignore             → Fichiers ignorés
 ```
 
 ---
@@ -328,12 +333,12 @@ Smart_Mail_Agent/
 
 ### 1. Lancer le bot Telegram (PC)
 ```bash
-python collector.py
+python -m src.collector
 ```
 
 ### 2. Lancer l'agent email (PC)
 ```bash
-python main.py
+python -m src.main
 ```
 
 ### 3. Le serveur OAuth tourne automatiquement sur Render
@@ -347,7 +352,7 @@ https://smart-mail-server.onrender.com
 
 | Limitation | Impact | Solution |
 |---|---|---|
-| `main.py` tourne en local | Système s'arrête si PC éteint | Oracle Cloud Free Tier |
+| `src/main.py` tourne en local | Système s'arrête si PC éteint | Oracle Cloud Free Tier |
 | Classification aléatoire | Notifications non pertinentes | Scoring ou API Claude |
 | Pas de déduplication | Doublons possibles | Table `processed_mails` |
 | API interne non sécurisée | Routes publiques accessibles | Header `X-API-Key` |
@@ -362,4 +367,4 @@ https://smart-mail-server.onrender.com
 2. **Sécuriser l'API** — ajouter `X-API-Key` sur les routes Flask
 3. **Classification intelligente** — remplacer le random par des règles ou API Claude
 4. **Résumé des emails** — extraire le corps + résumer avec Claude
-5. **Hébergement `main.py`** — Oracle Cloud Free Tier pour 24/7
+5. **Hébergement `src/main.py`** — Oracle Cloud Free Tier pour 24/7
